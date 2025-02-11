@@ -1,1 +1,8 @@
-streamlit
+streamlit>=1.0.0
+statsbombpy>=0.2.6
+pandas>=1.3.0
+matplotlib>=3.5.0
+mplsoccer>=1.1.0
+plotly>=5.13.0
+seaborn>=0.11.0
+highlight_text>=0.0.3
