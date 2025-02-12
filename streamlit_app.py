@@ -6,6 +6,8 @@ from mplsoccer import Pitch, VerticalPitch
 import plotly.express as px
 from highlight_text import ax_text
 import matplotlib.patheffects as path_effects
+from scipy.stats import percentileofscore
+import plotly.graph_objects as go
 
 # Configure Streamlit
 st.set_page_config(page_title="Euro 2024 Analysis", layout="wide")
@@ -49,10 +51,31 @@ def load_events_for_matches(match_ids):
         events = pd.DataFrame()
     return events
 
+@st.cache_data
+def load_full_competition_events():
+    # This loads all events for the competition (tournament-level data).
+    comp_events = sb.competition_events(
+         country='Europe',
+         division='UEFA Euro',
+         season='2024',
+         gender="male"
+    )
+    
+    # Extract coordinate columns in one go (to avoid fragmentation)
+    coords = comp_events['location'].apply(pd.Series).rename(columns={0: 'x', 1: 'y'})
+    pass_end_coords = comp_events['pass_end_location'].apply(pd.Series).rename(columns={0: 'pass_end_x', 1: 'pass_end_y'})
+    carry_end_coords = comp_events['carry_end_location'].apply(pd.Series).rename(columns={0: 'carry_end_x', 1: 'carry_end_y'})
+    comp_events = pd.concat([comp_events, coords, pass_end_coords, carry_end_coords], axis=1).copy()
+    
+    return comp_events
+
+
 def main():
     # Load competitions and matches data
     competitions = load_competitions()
     matches = load_matches()
+
+    full_comp_events = load_full_competition_events()
     
     # Build a sorted list of all teams (ignoring NaN)
     all_teams = pd.concat([matches['home_team'], matches['away_team']]).unique()
@@ -100,7 +123,8 @@ def main():
     # Sidebar: Choose Visualization (order: Progressions into Final Third, Progressions Map, Touch Comparison etc.)
     viz_option = st.sidebar.radio(
     "Select Visualization",
-    ("Progressions into Final Third", "Progressions Map", "Player Shot Map", "Goalkeeper Report Card", "Touch Comparison", "Team Shot Map")
+    ("Progressions into Final Third", "Progressions Map", "Player Shot Map",
+     "Goalkeeper Report Card", "Defender Report Card", "Midfielder Report Card", "Forward Report Card", "Touch Comparison", "Team Shot Map")
 )
 
     # Load events for the selected match(es)
@@ -189,10 +213,60 @@ def main():
         gk_list = events[events.position == "Goalkeeper"].player.dropna().unique().tolist()
         if not gk_list:
             st.error("No goalkeeper data available in the selected match(es).")
-            return
-        selected_gk = st.sidebar.selectbox("Select Goalkeeper", sorted(gk_list))
-        plot_goalkeeper_report_card(events, selected_gk)
+        else:
+            selected_gk = st.sidebar.selectbox("Select Goalkeeper", sorted(gk_list))
+            plot_goalkeeper_report_card(events, selected_gk, full_goalkeeper_events=full_comp_events)
 
+
+    elif viz_option == "Defender Report Card":
+        st.header("Defender Report Card")
+        # Use common defender positions to filter defenders from the currently filtered events,
+        # but note that the percentile calculations will come from full_comp_events.
+        defender_positions = ["Center Back", "Left Center Back", "Right Center Back", "Left Wing Back", "Right Wing Back"]
+        defenders_subset = events[events.position.isin(defender_positions)]
+        defender_list = defenders_subset.player.dropna().unique().tolist()
+        if not defender_list:
+            st.error("No defender data available in the selected match(es).")
+        else:
+            selected_defender = st.sidebar.selectbox("Select Defender", sorted(defender_list))
+            plot_defender_report_card(events, selected_defender, full_defender_events=full_comp_events)
+
+    elif viz_option == "Midfielder Report Card":
+        st.header("Midfielder Report Card")
+        # Use the updated midfielder_positions list to filter midfielders.
+        midfielder_positions = [
+            "Center Attacking Midfield",
+            "Center Defensive Midfield",
+            "Left Attacking Midfield",
+            "Left Center Midfield",
+            "Left Defensive Midfield",
+            "Left Midfield",
+            "Right Attacking Midfield",
+            "Right Center Midfield",
+            "Right Defensive Midfield",
+            "Right Midfield",
+            "Left Wing",
+            "Right Wing"
+        ]
+        midfielders_subset = events[events.position.isin(midfielder_positions)]
+        midfielder_list = midfielders_subset.player.dropna().unique().tolist()
+        if not midfielder_list:
+            st.error("No midfielder data available in the selected match(es).")
+        else:
+            selected_midfielder = st.sidebar.selectbox("Select Midfielder", sorted(midfielder_list))
+            plot_midfielder_report_card(events, selected_midfielder, full_midfielder_events=full_comp_events)
+
+    elif viz_option == "Forward Report Card":
+        st.header("Forward Report Card")
+        # Define forward positions for filtering.
+        forward_positions = ["Center Forward", "Left Center Forward", "Right Center Forward"]
+        forwards_subset = events[events.position.isin(forward_positions)]
+        forward_list = forwards_subset.player.dropna().unique().tolist()
+        if not forward_list:
+            st.error("No forward data available in the selected match(es).")
+        else:
+            selected_forward = st.sidebar.selectbox("Select Forward", sorted(forward_list))
+            plot_forward_report_card(events, selected_forward, full_forward_events=full_comp_events)
 
 
 def plot_progressions(events, team):
@@ -463,7 +537,7 @@ def plot_player_shot_map(events, player_name):
         s=goal_shots.shot_statsbomb_xg * 1000,
         c='green',
         alpha=0.9,
-        marker='football',  # 'football' marker works if your mplsoccer version supports it
+        marker='football',  # 'football' marker works if mplsoccer version supports it
         label='Goal',
         ax=ax
     )
@@ -473,12 +547,11 @@ def plot_player_shot_map(events, player_name):
     ax.set_title(f"{player_name} Shot Map", fontsize=20)
     st.pyplot(fig)
 
-def plot_goalkeeper_report_card(events, goalkeeper_name):
+def plot_goalkeeper_report_card(events, goalkeeper_name, full_goalkeeper_events):
     """
-    Displays a report card for the selected goalkeeper based on key event metrics,
-    and then plots a passing map for the goalkeeper.
+    Displays a Goalkeeper Report Card for the selected goalkeeper.
     
-    The report card shows these metrics (computed as counts of events):
+    For each of the following metrics:
       - Pass
       - Ball Receipt*
       - Carry
@@ -487,66 +560,340 @@ def plot_goalkeeper_report_card(events, goalkeeper_name):
       - Injury Stoppage
       - Foul Won
       
-    Then, below the metrics, a pitch is drawn with arrows representing the goalkeeper's passes.
+    the function computes:
+      1. The raw count of events for the selected goalkeeper (from the currently filtered events).
+      2. The percentile ranking of that count among all goalkeepers in the tournament 
+         (using full_goalkeeper_events filtered by position "Goalkeeper").
+         
+    Then, it displays these metrics in a table and shows a passing map (arrows representing passes)
+    made by the goalkeeper.
     """
-    # Filter events for the selected goalkeeper.
+    # Filter events for the selected goalkeeper from the current filtered events.
     gk_events = events[events.player == goalkeeper_name]
     
-    # Define the list of event types to include (excluding the ambiguous "Goal Keeper" type).
-    event_list = [
-        "Pass", 
-        "Ball Receipt*", 
-        "Carry", 
-        "Ball Recovery", 
-        "Bad Behaviour", 
-        "Injury Stoppage", 
+    # For tournament-wide percentiles, filter the full competition events for goalkeepers.
+    full_gk = full_goalkeeper_events[full_goalkeeper_events.position == "Goalkeeper"]
+    
+    # Define the list of metrics to report.
+    metrics = [
+        "Pass",
+        "Ball Receipt*",
+        "Carry",
+        "Ball Recovery",
+        "Bad Behaviour",
+        "Injury Stoppage",
         "Foul Won"
     ]
     
-    # Compute counts for each event type.
-    counts = {event: gk_events[gk_events.type == event].shape[0] for event in event_list}
+    report_rows = []
+    
+    # For each metric, compute the count for the selected goalkeeper and its percentile among all goalkeepers.
+    for metric in metrics:
+        selected_count = gk_events[gk_events.type == metric].shape[0]
+        
+        # Group full competition data by player for this metric.
+        gk_counts_df = full_gk[full_gk.type == metric].groupby('player').size().reset_index(name='count')
+        
+        # Compute the percentile; if no one has any events, assign 0.
+        if gk_counts_df.empty:
+            perc = 0
+        else:
+            perc = percentileofscore(gk_counts_df['count'], selected_count, kind='mean')
+        
+        report_rows.append({
+            "Metric": metric,
+            "Count": selected_count,
+            "Percentile": f"{perc:.1f}%"
+        })
+    
+    # Create a DataFrame for the report card.
+    df_report = pd.DataFrame(report_rows)
     
     st.markdown(f"### Goalkeeper Report Card: {goalkeeper_name}")
-    
-    # Display the metrics in two rows using Streamlit's columns.
-    # (Since we have 7 metrics, we'll show 4 in the first row and 3 in the second row.)
-    row1, row2 = st.columns(4), st.columns(3)
-    for i, event in enumerate(event_list):
-        if i < 4:
-            row1[i].metric(label=event, value=counts[event])
-        else:
-            row2[i - 4].metric(label=event, value=counts[event])
+    st.markdown("#### Metrics with Tournament-wide Percentiles")
+    st.dataframe(df_report)
     
     st.markdown("#### Passing Map")
-    
     # Filter for passes made by the goalkeeper.
     gk_passes = gk_events[gk_events.type == "Pass"]
     
     if gk_passes.empty:
         st.info("No passing data available for this goalkeeper in the selected match(es).")
     else:
-        # Set up a full pitch using mplsoccer's Pitch.
-        from mplsoccer import Pitch  # ensure this is imported at the top of your file
+        # Draw a full pitch.
         pitch = Pitch(pitch_type='statsbomb', pitch_color='white', line_color='black', line_zorder=2)
         fig, ax = pitch.draw(figsize=(12, 8))
         
-        # Plot each pass as an arrow from the starting coordinates to the pass end.
-        # (Make sure that your events DataFrame already has the columns 'x', 'y', 'pass_end_x', 'pass_end_y'.)
+        # For each pass, plot an arrow from the starting point to the pass end.
         for _, row in gk_passes.iterrows():
-            # Only plot if the pass has an end location
             if pd.notna(row['pass_end_x']) and pd.notna(row['pass_end_y']):
                 pitch.arrows(
-                    row['x'], row['y'], row['pass_end_x'], row['pass_end_y'],
-                    width=2,
-                    headwidth=8,
-                    headlength=5,
+                    row['x'], row['y'],
+                    row['pass_end_x'], row['pass_end_y'],
+                    width=2, headwidth=8, headlength=5,
                     color="orange",
-                    ax=ax,
-                    zorder=2
+                    ax=ax, zorder=2
                 )
-        
         ax.set_title(f"{goalkeeper_name} Passing Map", fontsize=20)
         st.pyplot(fig)
+
+def plot_defender_report_card(events, defender_name, full_defender_events):
+    """
+    Displays a Defender Report Card for the selected defender.
+    
+    It computes, for each of the recommended defensive metrics:
+      - Clearance
+      - Block
+      - Interception
+      - Duel
+      - Ball Recovery
+      - Pressure
+      - 50/50
+      - Dribbled Past
+      - Miscontrol
+      - Dispossessed
+      - Foul Committed
+      - Foul Won
+      
+    the raw count and the tournament-wide percentile (comparing only defenders) of that count.
+    
+    Only events from defender positions are considered. The recommended defender positions are:
+      "Center Back", "Left Center Back", "Right Center Back", "Left Wing Back", "Right Wing Back"
+    """
+    # Recommended metrics for defenders.
+    recommended_defender_metrics = [
+        "Clearance",
+        "Block",
+        "Interception",
+        "Duel",
+        "Ball Recovery",
+        "Pressure",
+        "50/50",
+        "Dribbled Past",
+        "Miscontrol",
+        "Dispossessed",
+        "Foul Committed",
+        "Foul Won"
+    ]
+    
+    # Define typical defender positions.
+    defender_positions = [
+        "Center Back",
+        "Left Center Back",
+        "Right Center Back",
+        "Left Wing Back",
+        "Right Wing Back"
+    ]
+    
+    # Filter the full tournament events to include only defenders.
+    full_defenders = full_defender_events[full_defender_events.position.isin(defender_positions)]
+    
+    # Use the full tournament data for the selected defender.
+    selected_defender_events = full_defender_events[full_defender_events.player == defender_name]
+    
+    # Build report rows for each recommended metric.
+    report_rows = []
+    for metric in recommended_defender_metrics:
+        # Get the selected defender's count for this metric.
+        selected_count = selected_defender_events[selected_defender_events['type'] == metric].shape[0]
+        
+        # For tournament-wide percentiles, group full defenders by player for this metric.
+        defender_counts_df = full_defenders[full_defenders['type'] == metric] \
+            .groupby('player').size().reset_index(name='count')
+        
+        if defender_counts_df.empty:
+            perc = 0
+        else:
+            # Compute the percentile ranking (using kind='mean' for consistency).
+            perc = percentileofscore(defender_counts_df['count'], selected_count, kind='mean')
+        
+        report_rows.append({
+            "Metric": metric,
+            "Count": selected_count,
+            "Percentile": f"{perc:.1f}%"
+        })
+    
+    # Create a DataFrame for display.
+    df_report = pd.DataFrame(report_rows)
+    
+    st.markdown(f"### Defender Report Card: {defender_name}")
+    st.markdown("#### Defensive Event Metrics with Tournament-wide Percentiles (Defenders Only)")
+    st.dataframe(df_report)
+
+def plot_midfielder_report_card(events, midfielder_name, full_midfielder_events):
+    """
+    Displays a Midfielder Report Card for the selected midfielder.
+    
+    For each of the following event types:
+       - Pass
+       - Ball Receipt*
+       - Carry
+       - Dribble
+       - Shot
+       - Interception
+       - Duel
+       - Foul Won
+       - Pressure
+       - Dispossessed
+       - Miscontrol
+       - Dribbled Past
+       - Ball Recovery
+       - Shield
+       
+    This function computes:
+       1. The raw count of events for the selected midfielder (using tournament-wide data)
+       2. The tournament-wide percentile ranking of that count among all midfielders.
+       
+    Only midfielders (as defined by the list of positions below) are compared.
+    """
+    # Midfielder positions:
+    midfielder_positions = [
+        "Center Attacking Midfield",
+        "Center Defensive Midfield",
+        "Left Attacking Midfield",
+        "Left Center Midfield",
+        "Left Defensive Midfield",
+        "Left Midfield",
+        "Right Attacking Midfield",
+        "Right Center Midfield",
+        "Right Defensive Midfield",
+        "Right Midfield",
+        "Left Wing",
+        "Right Wing"
+    ]
+    
+    # Filter the full tournament events to include only midfielders.
+    full_midfielders = full_midfielder_events[full_midfielder_events.position.isin(midfielder_positions)]
+    
+    # For tournament-wide comparisons, use the full tournament data.
+    # Get the selected midfielder's events from the full dataset.
+    selected_midfielder_events = full_midfielder_events[full_midfielder_events.player == midfielder_name]
+    
+    # Define the event list for midfielders:
+    event_list = [
+        "Pass",
+        "Ball Receipt*",
+        "Carry",
+        "Dribble",
+        "Shot",
+        "Interception",
+        "Duel",
+        "Foul Won",
+        "Pressure",
+        "Dispossessed",
+        "Miscontrol",
+        "Dribbled Past",
+        "Ball Recovery",
+        "Shield"
+    ]
+    
+    report_rows = []
+    for ev in event_list:
+        # Count the number of events of type `ev` for the selected midfielder.
+        selected_count = selected_midfielder_events[selected_midfielder_events['type'] == ev].shape[0]
+        
+        # For tournament-wide percentiles, group the full midfielder data by player for this event.
+        midfielder_counts_df = full_midfielders[full_midfielders['type'] == ev] \
+            .groupby('player').size().reset_index(name='count')
+        
+        if midfielder_counts_df.empty:
+            perc = 0
+        else:
+            # Compute the percentile ranking of the selected count among all midfielders.
+            perc = percentileofscore(midfielder_counts_df['count'], selected_count, kind='mean')
+        
+        report_rows.append({
+            "Event": ev,
+            "Count": selected_count,
+            "Percentile": f"{perc:.1f}%"
+        })
+    
+    df_report = pd.DataFrame(report_rows)
+    
+    st.markdown(f"### Midfielder Report Card: {midfielder_name}")
+    st.markdown("#### Event Metrics with Tournament-wide Percentiles (Midfielders Only)")
+    st.dataframe(df_report)
+
+def plot_forward_report_card(events, forward_name, full_forward_events):
+    """
+    Displays a Forward Report Card for the selected forward.
+    
+    For each of the following metrics:
+      - Shot (all shot events)
+      - Goal (derived: shot events with shot_outcome == "Goal")
+      - Pass
+      - Ball Receipt*
+      - Dribble
+      - Duel
+      - Offside
+      - Foul Won
+      - Pressure
+      - Miscontrol
+      
+    the function computes:
+      1. The raw count for the selected forward (from tournament-wide data).
+      2. The tournament-wide percentile ranking of that count among all forwards.
+    
+    Only forwards (defined as those whose position is one of:
+      "Center Forward", "Left Center Forward", "Right Center Forward")
+    are included in the comparison.
+    """
+    # Recommended forward metrics
+    metrics = [
+        "Shot",
+        "Goal",
+        "Pass",
+        "Ball Receipt*",
+        "Dribble",
+        "Duel",
+        "Offside",
+        "Foul Won",
+        "Pressure",
+        "Miscontrol"
+    ]
+    
+    # Define typical forward positions.
+    forward_positions = ["Center Forward", "Left Center Forward", "Right Center Forward"]
+    
+    # Filter the full tournament events to include only forwards.
+    full_forwards = full_forward_events[full_forward_events.position.isin(forward_positions)]
+    
+    # For tournament-wide comparisons, get the selected forward's events from the full data.
+    selected_forward_events = full_forward_events[full_forward_events.player == forward_name]
+    
+    report_rows = []
+    for metric in metrics:
+        if metric == "Goal":
+            # For "Goal", count shot events where shot_outcome is "Goal".
+            selected_count = selected_forward_events[
+                (selected_forward_events.type == "Shot") &
+                (selected_forward_events.shot_outcome == "Goal")
+            ].shape[0]
+            forward_counts_df = full_forwards[
+                (full_forwards.type == "Shot") &
+                (full_forwards.shot_outcome == "Goal")
+            ].groupby('player').size().reset_index(name='count')
+        else:
+            selected_count = selected_forward_events[selected_forward_events['type'] == metric].shape[0]
+            forward_counts_df = full_forwards[full_forwards['type'] == metric] \
+                .groupby('player').size().reset_index(name='count')
+        
+        if forward_counts_df.empty:
+            perc = 0
+        else:
+            perc = percentileofscore(forward_counts_df['count'], selected_count, kind='mean')
+        
+        report_rows.append({
+            "Metric": metric,
+            "Count": selected_count,
+            "Percentile": f"{perc:.1f}%"
+        })
+    
+    df_report = pd.DataFrame(report_rows)
+    
+    st.markdown(f"### Forward Report Card: {forward_name}")
+    st.markdown("#### Event Metrics with Tournament-wide Percentiles (Forwards Only)")
+    st.dataframe(df_report)
 
 if __name__ == "__main__":
     main()
