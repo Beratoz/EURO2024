@@ -1,6 +1,7 @@
 import streamlit as st
 from statsbombpy import sb
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from mplsoccer import Pitch, VerticalPitch
 import plotly.express as px
@@ -124,7 +125,8 @@ def main():
     viz_option = st.sidebar.radio(
     "Select Visualization",
     ("Progressions into Final Third", "Progressions Map", "Player Shot Map",
-     "Goalkeeper Report Card", "Defender Report Card", "Midfielder Report Card", "Forward Report Card", "Touch Comparison", "Team Shot Map")
+     "Goalkeeper Report Card", "Defender Report Card", "Midfielder Report Card",
+     "Forward Report Card", "Team Passing Network", "Team xG Hot Zones", "Touch Comparison", "Team Shot Map")
 )
 
     # Load events for the selected match(es)
@@ -267,6 +269,14 @@ def main():
         else:
             selected_forward = st.sidebar.selectbox("Select Forward", sorted(forward_list))
             plot_forward_report_card(events, selected_forward, full_forward_events=full_comp_events)
+
+    elif viz_option == "Team Passing Network":
+        st.header("Team Passing Network")
+        plot_team_passing_network(events, team)
+
+    elif viz_option == "Team xG Hot Zones":
+        st.header("Team xG Hot Zones")
+        plot_team_xg_heatmap(events, team)
 
 
 def plot_progressions(events, team):
@@ -552,49 +562,45 @@ def plot_goalkeeper_report_card(events, goalkeeper_name, full_goalkeeper_events)
     Displays a Goalkeeper Report Card for the selected goalkeeper.
     
     For each of the following metrics:
+      - Goal Keeper (saves / key interventions)
       - Pass
       - Ball Receipt*
-      - Carry
-      - Ball Recovery
-      - Bad Behaviour
-      - Injury Stoppage
-      - Foul Won
+      - Pressure
+      - Clearance
+      - Block
+      - Shield
       
-    the function computes:
-      1. The raw count of events for the selected goalkeeper (from the currently filtered events).
-      2. The percentile ranking of that count among all goalkeepers in the tournament 
-         (using full_goalkeeper_events filtered by position "Goalkeeper").
-         
-    Then, it displays these metrics in a table and shows a passing map (arrows representing passes)
-    made by the goalkeeper.
+    This function computes:
+      1. The raw count of events for the selected goalkeeper (from tournament-wide data).
+      2. The tournament-wide percentile ranking of that count among all goalkeepers.
+      
+    Only events from players with position "Goalkeeper" (in the full tournament data) are compared.
     """
-    # Filter events for the selected goalkeeper from the current filtered events.
-    gk_events = events[events.player == goalkeeper_name]
-    
-    # For tournament-wide percentiles, filter the full competition events for goalkeepers.
-    full_gk = full_goalkeeper_events[full_goalkeeper_events.position == "Goalkeeper"]
-    
-    # Define the list of metrics to report.
+    # Recommended metrics for goalkeepers
     metrics = [
+        "Goal Keeper",
         "Pass",
         "Ball Receipt*",
-        "Carry",
-        "Ball Recovery",
-        "Bad Behaviour",
-        "Injury Stoppage",
-        "Foul Won"
+        "Pressure",
+        "Clearance",
+        "Block",
+        "Shield"
     ]
     
-    report_rows = []
+    # Filter the full competition events to include only goalkeepers.
+    full_gks = full_goalkeeper_events[full_goalkeeper_events.position == "Goalkeeper"]
     
-    # For each metric, compute the count for the selected goalkeeper and its percentile among all goalkeepers.
+    # For tournament-wide comparisons, get the selected goalkeeper's events from full data.
+    selected_gk_events = full_goalkeeper_events[full_goalkeeper_events.player == goalkeeper_name]
+    
+    report_rows = []
     for metric in metrics:
-        selected_count = gk_events[gk_events.type == metric].shape[0]
+        # Count the number of events of this type for the selected goalkeeper.
+        selected_count = selected_gk_events[selected_gk_events['type'] == metric].shape[0]
         
-        # Group full competition data by player for this metric.
-        gk_counts_df = full_gk[full_gk.type == metric].groupby('player').size().reset_index(name='count')
+        # Group the full goalkeeper data by player for this event.
+        gk_counts_df = full_gks[full_gks['type'] == metric].groupby('player').size().reset_index(name='count')
         
-        # Compute the percentile; if no one has any events, assign 0.
         if gk_counts_df.empty:
             perc = 0
         else:
@@ -606,16 +612,15 @@ def plot_goalkeeper_report_card(events, goalkeeper_name, full_goalkeeper_events)
             "Percentile": f"{perc:.1f}%"
         })
     
-    # Create a DataFrame for the report card.
     df_report = pd.DataFrame(report_rows)
     
     st.markdown(f"### Goalkeeper Report Card: {goalkeeper_name}")
-    st.markdown("#### Metrics with Tournament-wide Percentiles")
+    st.markdown("#### Event Metrics with Tournament-wide Percentiles (Goalkeepers Only)")
     st.dataframe(df_report)
     
     st.markdown("#### Passing Map")
     # Filter for passes made by the goalkeeper.
-    gk_passes = gk_events[gk_events.type == "Pass"]
+    gk_passes = selected_gk_events[selected_gk_events.type == "Pass"]
     
     if gk_passes.empty:
         st.info("No passing data available for this goalkeeper in the selected match(es).")
@@ -894,6 +899,150 @@ def plot_forward_report_card(events, forward_name, full_forward_events):
     st.markdown(f"### Forward Report Card: {forward_name}")
     st.markdown("#### Event Metrics with Tournament-wide Percentiles (Forwards Only)")
     st.dataframe(df_report)
+
+def plot_team_passing_network(events, team):
+    """
+    Plots a passing network for the selected team using only the starting eleven.
+    
+    Steps:
+      1. Filter the events for the selected team and only successful passes.
+      2. Determine the starting eleven as the top 11 players (by overall pass involvement).
+      3. Filter passes so that both the passer and the recipient are in the starting eleven.
+      4. Compute an average (x,y) position for each player (node) based on their passing (as a passer and as a receiver).
+      5. Draw a pitch, then for each passing pair draw an arrow whose thickness is proportional to the pass count.
+      6. Draw nodes with sizes proportional to each player’s total pass involvement.
+    """
+    # Filter events for the selected team and only successful passes (pass_outcome is NaN for completed passes)
+    team_passes = events[
+        (events.team == team) &
+        (events.type == "Pass") &
+        (events.pass_outcome.isna())
+    ].copy()
+    
+    # Determine all players involved (as passer or recipient)
+    players_series = pd.concat([team_passes["player"], team_passes["pass_recipient"]])
+    players_counts = players_series.value_counts()  # total involvement count per player
+    
+    # Determine the starting eleven: take top 11 by involvement
+    starting_eleven = players_counts.head(11).index.tolist()
+    
+    # Filter team_passes to only include events where both passer and recipient are in starting eleven.
+    team_passes = team_passes[
+        team_passes["player"].isin(starting_eleven) &
+        team_passes["pass_recipient"].isin(starting_eleven)
+    ]
+    
+    # Group passes by passer and recipient and compute average positions and pass counts.
+    pass_group = team_passes.groupby(["player", "pass_recipient"]).agg({
+        "x": "mean",
+        "y": "mean",
+        "pass_end_x": "mean",
+        "pass_end_y": "mean"
+    }).reset_index()
+    # Add a column with the pass count between each pair.
+    pass_group["pass_count"] = team_passes.groupby(["player", "pass_recipient"]).size().values
+    
+    # Compute nodes: For each player in the starting eleven, compute their average (x,y) position.
+    nodes = []
+    for player in starting_eleven:
+        # Get starting locations (when the player makes a pass)
+        passer_locs = team_passes[team_passes["player"] == player][["x", "y"]]
+        # Get receiving locations (when the player is the recipient)
+        receiver_locs = team_passes[team_passes["pass_recipient"] == player][["pass_end_x", "pass_end_y"]]
+        if not passer_locs.empty and not receiver_locs.empty:
+            avg_x = np.mean(np.concatenate([passer_locs["x"].values, receiver_locs["pass_end_x"].values]))
+            avg_y = np.mean(np.concatenate([passer_locs["y"].values, receiver_locs["pass_end_y"].values]))
+        elif not passer_locs.empty:
+            avg_x = passer_locs["x"].mean()
+            avg_y = passer_locs["y"].mean()
+        elif not receiver_locs.empty:
+            avg_x = receiver_locs["pass_end_x"].mean()
+            avg_y = receiver_locs["pass_end_y"].mean()
+        else:
+            avg_x, avg_y = 0, 0
+        nodes.append({
+            "player": player,
+            "x": avg_x,
+            "y": avg_y,
+            "total_passes": players_counts[player]  # overall involvement for scaling marker size
+        })
+    nodes = pd.DataFrame(nodes)
+    
+    # Create a pitch using mplsoccer.
+    pitch = Pitch(pitch_type="statsbomb", line_zorder=2, linewidth=2)
+    fig, ax = pitch.draw(figsize=(12, 8))
+    
+    # Draw edges: for each passing pair, draw an arrow from the passer's node to the recipient's node.
+    for idx, row in pass_group.iterrows():
+        try:
+            passer = nodes[nodes.player == row["player"]].iloc[0]
+            recipient = nodes[nodes.player == row["pass_recipient"]].iloc[0]
+        except IndexError:
+            continue
+        # Draw an arrow with width proportional to pass_count.
+        ax.arrow(passer.x, passer.y,
+                recipient.x - passer.x, recipient.y - passer.y,
+                width=row["pass_count"] * 0.05,  # reduced scaling factor for thinner lines
+                color="blue", alpha=0.7,
+                head_width=4, head_length=4, zorder=1)
+    
+    # Draw nodes: Plot each player's node as a red circle.
+    for idx, row in nodes.iterrows():
+        # Set marker size proportional to total pass involvement.
+        node_size = row["total_passes"] * 2  # adjust scaling factor as needed
+        ax.scatter(row.x, row.y, s=node_size, color="red", zorder=3)
+        # Label the node with the player's name.
+        ax.text(row.x, row.y, row.player, fontsize=10, ha="center", va="center", zorder=4)
+    
+    ax.set_title(f"Team Passing Network for {team} (Starting Eleven)", fontsize=20)
+    st.pyplot(fig)
+
+def plot_team_xg_heatmap(events, team):
+    """
+    Plots a heatmap showing the total xG (expected goals) accumulated in different zones
+    on the pitch for a selected team.
+    
+    This uses the 'shot_statsbomb_xg' metric, aggregated over shot end locations.
+    """
+    # Filter events for the selected team and for shot events.
+    team_shots = events[(events.team == team) & (events.type == "Shot")].copy()
+    if team_shots.empty:
+        st.error("No shot data available for the selected team.")
+        return
+    
+    # Ensure shot end coordinates are available.
+    # If not already extracted, try to extract them from 'shot_end_location'.
+    if "shot_end_x" not in team_shots.columns or "shot_end_y" not in team_shots.columns:
+        team_shots[['shot_end_x', 'shot_end_y']] = team_shots['shot_end_location'].apply(
+            lambda loc: pd.Series(loc) if isinstance(loc, list) and len(loc) == 2 else pd.Series([None, None])
+        )
+    
+    # Drop rows with missing coordinates.
+    team_shots = team_shots.dropna(subset=["shot_end_x", "shot_end_y"])
+    
+    # Create a pitch using mplsoccer.
+    pitch = Pitch(pitch_type="statsbomb", line_zorder=2, linewidth=2)
+    fig, ax = pitch.draw(figsize=(12, 8))
+    
+    # Create a hexbin plot:
+    # - 'C' is set to the shot_statsbomb_xg values and we'll sum them in each bin.
+    # - 'gridsize' controls the number of bins.
+    hb = ax.hexbin(
+        team_shots["shot_end_x"],
+        team_shots["shot_end_y"],
+        C=team_shots["shot_statsbomb_xg"],
+        reduce_C_function=np.sum,
+        gridsize=20,
+        cmap="Reds",
+        mincnt=1,
+        edgecolors='grey'
+    )
+    
+    # Add a colorbar to show the scale (total xG per bin).
+    fig.colorbar(hb, ax=ax, label="Total xG")
+    ax.set_title(f"{team} xG Hot Zones", fontsize=20)
+    
+    st.pyplot(fig)
 
 if __name__ == "__main__":
     main()
