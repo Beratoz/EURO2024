@@ -394,7 +394,7 @@ def plot_progressions_map(events, team, player_name):
     
     # Add the legend and title
     ax.legend(facecolor='white', handlelength=5, edgecolor='None', fontsize=20, loc='best')
-    ax.set_title(f'{player_name} Progressions into Final 3rd: Euros Final', fontsize=30, color='black')
+    ax.set_title(f'{player_name} Progressions into Final 3rd', fontsize=30, color='black')
     
     st.pyplot(fig)
 
