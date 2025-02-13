@@ -25,7 +25,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
 # Configure StatsBombpy to use free data
 sb.login = lambda: None  # Bypass credential check for open data
 
@@ -124,9 +123,9 @@ def main():
     # Sidebar: Choose Visualization (order: Progressions into Final Third, Progressions Map, Touch Comparison etc.)
     viz_option = st.sidebar.radio(
     "Select Visualization",
-    ("Progressions into Final Third", "Progressions Map", "Player Shot Map",
-     "Goalkeeper Report Card", "Defender Report Card", "Midfielder Report Card",
-     "Forward Report Card", "Team Passing Network", "Team xG Hot Zones", "Touch Comparison", "Team Shot Map")
+    ("Progressions into Final Third", "Progressions Map", "Touch Comparison", "Player Shot Map",
+     "Team Shot Map", "Team Passing Network", "Team xG Hot Zones", "xG vs. Actual Goals", "Goalkeeper Report Card", 
+     "Defender Report Card", "Midfielder Report Card", "Forward Report Card")
 )
 
     # Load events for the selected match(es)
@@ -277,6 +276,10 @@ def main():
     elif viz_option == "Team xG Hot Zones":
         st.header("Team xG Hot Zones")
         plot_team_xg_heatmap(events, team)
+    
+    elif viz_option == "xG vs. Actual Goals":
+        st.header("xG vs. Actual Goals")
+        plot_team_xg_vs_actual_goals(events, team, matches)
 
 
 def plot_progressions(events, team):
@@ -998,6 +1001,7 @@ def plot_team_passing_network(events, team):
     st.pyplot(fig)
 
 def plot_team_xg_heatmap(events, team):
+
     """
     Plots a heatmap showing the total xG (expected goals) accumulated in different zones
     on the pitch for a selected team.
@@ -1043,6 +1047,62 @@ def plot_team_xg_heatmap(events, team):
     ax.set_title(f"{team} xG Hot Zones", fontsize=20)
     
     st.pyplot(fig)
+
+def plot_team_xg_vs_actual_goals(events, team, matches):
+    """
+    Plots a scatter plot comparing expected goals (xG) and actual goals for the selected team.
+    
+    For each match, the function computes:
+      - Total xG: Sum of "shot_statsbomb_xg" over all shot events.
+      - Actual Goals: Count of shot events where shot_outcome == "Goal".
+    
+    The function then merges this summary with the matches DataFrame to create a "game_name" 
+    (for example, "2024-06-15 - Home vs Away") used in hover data instead of the raw match_id.
+    
+    A diagonal line (x = y) is added as a reference.
+    """
+    # Filter shot events for the selected team.
+    team_shots = events[(events.team == team) & (events.type == "Shot")].copy()
+    if team_shots.empty:
+        st.error("No shot data available for the selected team.")
+        return
+    
+    # Group by match_id and compute total xG and actual goals.
+    summary = team_shots.groupby("match_id").apply(
+        lambda df: pd.Series({
+            "total_xG": df["shot_statsbomb_xg"].sum(),
+            "actual_goals": df[df["shot_outcome"] == "Goal"].shape[0]
+        })
+    ).reset_index()
+    
+    # Merge with matches DataFrame to get additional match details.
+    # Assume matches DataFrame contains columns: match_id, home_team, away_team, match_date.
+    summary = summary.merge(matches[['match_id', 'home_team', 'away_team', 'match_date']],
+                              on='match_id', how='left')
+    
+    # Create a "game_name" column (adjust formatting as needed)
+    summary["game_name"] = summary["match_date"].astype(str) + " - " + summary["home_team"] + " vs " + summary["away_team"]
+    
+    # Create a scatter plot using Plotly Express, with hover_data showing game_name.
+    fig = px.scatter(
+        summary, 
+        x="total_xG", 
+        y="actual_goals",
+        hover_data=["game_name"],
+        labels={"total_xG": "Total xG", "actual_goals": "Actual Goals"},
+        title=f"{team} xG vs. Actual Goals by Match"
+    )
+    
+    # Determine an axis limit for the diagonal line.
+    max_val = max(summary["total_xG"].max(), summary["actual_goals"].max()) * 1.1
+    fig.add_shape(
+        type="line",
+        x0=0, y0=0,
+        x1=max_val, y1=max_val,
+        line=dict(color="grey", dash="dash")
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
     main()
