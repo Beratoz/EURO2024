@@ -1,4 +1,4 @@
-# Euro2024 StatsBomb Analysis App
+# Euro 2024 StatsBomb Analysis App
 
 Welcome to the Euro 2024 StatsBomb Analysis App: An interactive sports analytics project built with Streamlit using Hudl StatsBomb's free Euro 2024 data.
 
