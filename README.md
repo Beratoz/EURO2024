@@ -1,6 +1,6 @@
 # Euro2024 StatsBomb Analysis App
 
-Welcome to the Euro2024 StatsBomb Analysis App – an interactive sports analytics project built with Streamlit using Hudl StatsBomb's free EURO 2024 data. This project is a labor of love and a fun way to practice analytics skills while exploring the performance of teams and players during Euro 2024.
+Welcome to the Euro 2024 StatsBomb Analysis App: An interactive sports analytics project built with Streamlit using Hudl StatsBomb's free Euro 2024 data.
 
 ## Table of Contents
 
@@ -14,9 +14,9 @@ Welcome to the Euro2024 StatsBomb Analysis App – an interactive sports analyti
 
 ## Overview
 
-This interactive app aggregates and visualizes event-level data from EURO 2024 to derive insights about team tactics and individual performances. The project features a range of visualizations—from team passing networks and xG hot zones to detailed player report cards for goalkeepers, defenders, midfielders, and forwards.
+This interactive app aggregates and visualizes event-level data from Euro 2024 to derive insights about team tactics and individual performances. The project features a range of visualizations from team passing networks and xG hot zones to player report cards for goalkeepers, defenders, midfielders, and forwards.
 
-I built this project for fun and to hone my sports analytics skills. While the app is fully deployed and operational, there’s still room for growth, and I welcome feedback and ideas for improvement.
+I built this project for fun and to develop my sports analytics skills. While the app is fully deployed and operational, there’s still room for growth, and I welcome feedback and ideas for improvement.
 
 ## Features
 
@@ -35,7 +35,7 @@ I built this project for fun and to hone my sports analytics skills. While the a
 
 ## Data Sources
 
-This app uses free data from Hudl StatsBomb's EURO 2024 dataset. The following tables are used:
+This app uses free data from Hudl StatsBomb's Euro 2024 dataset. The following tables are used:
 - **Competitions:** Competition-level details.
 - **Matches:** Match-level information.
 - **Events:** Detailed event-level data, which forms the basis of all our analyses.
