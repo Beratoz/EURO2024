@@ -76,9 +76,9 @@ This app uses free data from Hudl StatsBomb's EURO 2024 dataset. The following t
 
 To run the app locally:
 
-```
-streamlit run streamlit_app.py
-```
+   ```
+   streamlit run streamlit_app.py
+   ```
 
 ## Feedback and Contributions
 
