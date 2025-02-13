@@ -55,23 +55,30 @@ This app uses free data from Hudl StatsBomb's EURO 2024 dataset. The following t
 1. **Clone the Repository:**
 
    ```
-   git clone https://github.com/beratoz/EURO2024.git
-   cd EURO2024
+   git clone https://github.com/Beratoz/EURO2024_Streamlit_App.git
+   cd EURO2024_Streamlit_App
    ```
 
 2. **Set Up a Virtual Environment (Optional but Recommended):**
 
-python -m venv venv
-source venv/bin/activate  # On Windows, use venv\Scripts\activate
+   ```
+   python -m venv venv
+   source venv/bin/activate  # On Windows, use venv\Scripts\activate
+   ```
 
 3. **Install Dependencies:**
-pip install -r requirements.txt
+
+   ```
+   pip install -r requirements.txt
+   ```
 
 ## Usage
 
 To run the app locally:
 
+```
 streamlit run streamlit_app.py
+```
 
 ## Feedback and Contributions
 
