@@ -55,7 +55,7 @@ This app uses free data from Hudl StatsBomb's Euro 2024 dataset. The following t
 1. **Clone the Repository:**
 
    ```
-   git clone https://github.com/Beratoz/Euro_2024_Streamlit_App.git
+   git clone https://github.com/Beratozmen/Euro_2024_Streamlit_App.git
    cd Euro_2024_Streamlit_App
    ```
 
