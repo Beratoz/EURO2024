@@ -1,6 +1,6 @@
-# Euro 2024 StatsBomb Analysis App
+# Euro 2024 Analysis App
 
-Welcome to the Euro 2024 StatsBomb Analysis App: An interactive sports analytics project built with Streamlit using Hudl StatsBomb's free Euro 2024 data.
+Welcome to the Euro 2024 Analysis App: An interactive sports analytics project built with Streamlit using Hudl Statsbomb's free Euro 2024 data.
 
 ## Table of Contents
 
@@ -35,7 +35,7 @@ I built this project for fun and to develop my sports analytics skills. While th
 
 ## Data Sources
 
-This app uses free data from Hudl StatsBomb's Euro 2024 dataset. The following tables are used:
+This app uses free data from Hudl Statsbomb's Euro 2024 dataset. The following tables are used:
 - **Competitions:** Competition-level details.
 - **Matches:** Match-level information.
 - **Events:** Detailed event-level data, which forms the basis of all our analyses.
@@ -48,7 +48,7 @@ This app uses free data from Hudl StatsBomb's Euro 2024 dataset. The following t
 - **Pandas & NumPy** – For data manipulation and aggregation
 - **Plotly Express & Plotly Graph Objects** – For interactive visualizations
 - **mplsoccer** – For drawing football pitches and spatial visualizations
-- **StatsBombpy** – For accessing StatsBomb’s free football data
+- **Statsbombpy** – For accessing Statsbomb’s free football data
 
 ## Installation
 

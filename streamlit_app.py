@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 
 # Configure Streamlit
 st.set_page_config(page_title="Euro 2024 Analysis", layout="wide")
-st.title("Euro 2024 StatsBomb Analysis ⚽")
+st.title("Euro 2024 Analysis ⚽")
 
 st.markdown(
     """
@@ -20,12 +20,12 @@ st.markdown(
     
     Hi, I'm **Berat Ozmen** and I'm a sports analytics fan. I built this app purely for fun. You can connect with me on [LinkedIn](https://www.linkedin.com/in/beratozmen/).
     
-    This app uses [StatsBomb's free data](https://statsbomb.com/news/statsbomb-release-free-euro-2024-data/) for Euro 2024 analysis.
+    This app uses [Statsbomb's free data](https://statsbomb.com/news/statsbomb-release-free-euro-2024-data/) for Euro 2024 analysis.
     """,
     unsafe_allow_html=True
 )
 
-# Configure StatsBombpy to use free data
+# Configure Statsbombpy to use free data
 sb.login = lambda: None  # Bypass credential check for open data
 
 # Cache competitions data
